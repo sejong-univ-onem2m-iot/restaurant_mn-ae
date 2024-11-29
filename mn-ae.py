@@ -13,12 +13,16 @@ MN_CSE_URL = "http://localhost:8080/id-in"
 IN_CSE_URL = "http://localhost:8080/id-in" #in cse로 바꿔줘야함
 AE_ID = 'ID-IN'
 
-def create_headers(originator: str, resource_type: str = None, request_id: str = None) -> dict:
+# 각 request에 맞는 onem2m 표준 header 생성
+def create_headers(originator: str, resource_type: str = None, request_id: str = None, time: str = None, rsc: str = None) -> dict: 
     headers = {
         "Accept": "application/json;",
         "X-M2M-Origin": originator,
         "X-M2M-RVI": "2a"
     }
+
+    if rsc:
+        headers["X-M2M-RSC"] = rsc
 
     if resource_type:  # 리소스 타입
         headers["Content-Type"] = 'application/json;ty=' + resource_type
@@ -26,9 +30,51 @@ def create_headers(originator: str, resource_type: str = None, request_id: str =
     if request_id:  # 요청 식별자
         headers["X-M2M-RI"] = request_id
 
+    if time:
+        headers["'X-M2M-OT'"] = time
+
     return headers
 
-# IN-cse에 ADN-AE 등록
+# 생성된 mn-cse의 ae에 Container 생성 함수
+def create_container(ae_url, sensor, ae_ri):
+    header = create_headers(ae_ri,'3','creat_cnt')
+    container_payload = {
+        "m2m:cnt": {
+            "rn": sensor
+        }
+    }
+
+    response = requests.post(ae_url, headers=header, json=container_payload)
+    if response.status_code == 201:
+        print(f"Container '{sensor}' created successfully under AE {ae_url}")
+    else:
+        print(f"Failed to create container '{sensor}': {response.status_code} {response.text}")
+
+# mn-cse에 ae생성에 대한 Subscription 생성 함수, 서버 시작시 동작
+def create_subscription():
+    subscription_url = f"{MN_CSE_URL}"
+    header = create_headers('CAdmin', '23', 'create_sub') # mn쪽 originator를 알아내고 가져와야함.
+    subscription_payload = {
+        "m2m:sub": {
+            "rn": "aeSubscription",
+            "nu": ["http://192.168.0.2:5000/notifi"],
+            "nct": 1,
+            "enc": {
+                "net": [3]  # Event type: Resource Creation
+            }
+        }
+    }
+    responses = requests.get(subscription_url, headers={"X-M2M-Origin": "CAdmin", "Accept": "application/json"})
+    if responses.status_code == 409: #잘 안먹힘 나중에 다시 봐야할듯
+        print("Subscription already exists. Skipping creation.")
+        return  # 이미 존재하므로 생성하지 않음
+    response = requests.post(subscription_url, headers=header, json=subscription_payload)
+    if response.status_code == 201:
+        print("Subscription created successfully!")
+    else:
+        print(f"Failed to create subscription: {response.status_code} {response.text}")
+
+# IN-cse에 ADN-AE 등록, 서버시작시 동작
 @app.route('/register_adn_ae', methods=['POST'])
 def register_adn_ae():
     data = request.json
@@ -48,45 +94,6 @@ def register_adn_ae():
         return jsonify({"message": "AE 등록 성공", "data": response.json()}), 201
     else:
         return jsonify({"message": "AE 등록 실패", "status": response.status_code}), response.status_code
-
-# mn-cse에 ae생성에 대한 Subscription 생성 함수
-def create_subscription():
-    subscription_url = f"{MN_CSE_URL}"
-    header = create_headers('CAdmin', '23', 'create_sub')
-    subscription_payload = {
-        "m2m:sub": {
-            "rn": "aeSubscription",
-            "nu": ["http://192.168.0.2:5000/notifi"],
-            "nct": 1,
-            "enc": {
-                "net": [3]  # Event type: Resource Creation
-            }
-        }
-    }
-    responses = requests.get(subscription_url, headers={"X-M2M-Origin": "CAdmin", "Accept": "application/json"})
-    if responses.status_code == 200: #잘 안먹힘 나중에 다시 봐야할듯
-        print("Subscription already exists. Skipping creation.")
-        return  # 이미 존재하므로 생성하지 않음
-    response = requests.post(subscription_url, headers=header, json=subscription_payload)
-    if response.status_code == 201:
-        print("Subscription created successfully!")
-    else:
-        print(f"Failed to create subscription: {response.status_code} {response.text}")
-
-# 생성된 mn-cse의 ae에 Container 생성 함수
-def create_container(ae_url, sensor, ae_ri):
-    header = create_headers(ae_ri,'3','creat_cnt')
-    container_payload = {
-        "m2m:cnt": {
-            "rn": sensor
-        }
-    }
-
-    response = requests.post(ae_url, headers=header, json=container_payload)
-    if response.status_code == 201:
-        print(f"Container '{sensor}' created successfully under AE {ae_url}")
-    else:
-        print(f"Failed to create container '{sensor}': {response.status_code} {response.text}")
 
 # Notification 처리 엔드포인트
 @app.route('/notifi', methods=['POST'])
@@ -108,15 +115,10 @@ def handle_notification():
         print("Headers:", dict(request.headers))
 
         # 응답 생성
-        headers = {
-            'X-M2M-RSC': '2000',  # oneM2M Response Status Code (2000: OK)
-            'X-M2M-Origin': 'mn-ae',  # Originator (자신의 AE 이름 또는 식별자)
-            'X-M2M-RI': request.headers.get('X-M2M-RI', ''),  # 요청 ID 그대로 반환
-            'X-M2M-OT': datetime.utcnow().strftime('%Y%m%dT%H%M%S')  # UTC 현재 시간
-        }
+        header = create_headers('mn-ae', request.headers.get('X-M2M-RI', ''), datetime.utcnow().strftime('%Y%m%dT%H%M%S'), '2000')
 
         # 상태 코드 200 OK 반환
-        return Response(status=200, headers=headers)
+        return Response(status=200, headers=header)
     
     # 실제 알림 처리
     # AE URL 추출
@@ -175,4 +177,3 @@ def health_check():
 if __name__ == '__main__':
     threading.Thread(target=create_subscription).start()
     app.run(host='0.0.0.0', debug=True, port=5000)
-    CORS(app)
