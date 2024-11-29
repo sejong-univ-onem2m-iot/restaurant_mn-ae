@@ -1,6 +1,11 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
+from flask_cors import CORS
 import requests
 import json
+from datetime import datetime
+import threading
+import time
+
 app = Flask(__name__)
 
 # MN-CSE 및 IN-CSE의 엔드포인트
@@ -51,14 +56,17 @@ def create_subscription():
     subscription_payload = {
         "m2m:sub": {
             "rn": "aeSubscription",
-            "nu": [f"http://192.168.0.2:5000/notifi"],
+            "nu": ["http://192.168.0.2:5000/notifi"],
             "nct": 1,
             "enc": {
                 "net": [3]  # Event type: Resource Creation
             }
         }
     }
-
+    responses = requests.get(subscription_url, headers={"X-M2M-Origin": "CAdmin", "Accept": "application/json"})
+    if responses.status_code == 200: #잘 안먹힘 나중에 다시 봐야할듯
+        print("Subscription already exists. Skipping creation.")
+        return  # 이미 존재하므로 생성하지 않음
     response = requests.post(subscription_url, headers=header, json=subscription_payload)
     if response.status_code == 201:
         print("Subscription created successfully!")
@@ -66,8 +74,8 @@ def create_subscription():
         print(f"Failed to create subscription: {response.status_code} {response.text}")
 
 # 생성된 mn-cse의 ae에 Container 생성 함수
-def create_container(ae_url, sensor):
-    header = create_headers('CAdmin','3','creat_cnt')
+def create_container(ae_url, sensor, ae_ri):
+    header = create_headers(ae_ri,'3','creat_cnt')
     container_payload = {
         "m2m:cnt": {
             "rn": sensor
@@ -88,21 +96,47 @@ def handle_notification():
     print(f"Notification received: {json.dumps(notification, indent=4)}")
 
     # Verification Request 확인
-    if notification.get("m2m:sgn", {}).get("vrq"):
-        print("Received Verification Request. Returning 200 OK.")
-        # 최소한의 응답 반환
-        return jsonify({}), 200
+    if notification.get("m2m:sgn", {}).get("vrq", False):
+        content_type = request.headers.get('Content-Type', '').lower()
+        if content_type == 'application/json':
+            notification_data = request.json  # JSON 형식의 데이터
+        elif content_type == 'application/vnd.onem2m-res+json':
+            notification_data = request.json  # oneM2M JSON 형식
 
+        # 요청 데이터 디버깅용 출력
+        print("Received Notification:", notification_data)
+        print("Headers:", dict(request.headers))
+
+        # 응답 생성
+        headers = {
+            'X-M2M-RSC': '2000',  # oneM2M Response Status Code (2000: OK)
+            'X-M2M-Origin': 'mn-ae',  # Originator (자신의 AE 이름 또는 식별자)
+            'X-M2M-RI': request.headers.get('X-M2M-RI', ''),  # 요청 ID 그대로 반환
+            'X-M2M-OT': datetime.utcnow().strftime('%Y%m%dT%H%M%S')  # UTC 현재 시간
+        }
+
+        # 상태 코드 200 OK 반환
+        return Response(status=200, headers=headers)
+    
     # 실제 알림 처리
     # AE URL 추출
-    new_ae_url = notification.get("m2m:sgn", {}).get("sur")
-    if new_ae_url:
-        print(f"New AE created: {new_ae_url}")
+    new_ae_data = notification.get("m2m:sgn", {}).get("nev", {}).get("rep", {}).get("m2m:ae", {})
+    print(f"Extracted AE Data: {new_ae_data}")  # 디버깅용 출력
+
+    new_ae_rn = new_ae_data.get("rn")  # 'rn' 필드 값 추출
+    new_ae_ri = new_ae_data.get("ri")
+    if not new_ae_rn:
+        print("AE Resource Name (rn) is missing in the notification.")
+
+    if new_ae_rn:
+        print(f"New AE created: {new_ae_rn}")
 
         # 센서별 Container 생성
         sensor_names = ["temperatureSensor", "humiditySensor", "lightSensor"]
         for sensor in sensor_names:
-            create_container(new_ae_url, sensor)
+            ae_url = f"http://localhost:8080/{new_ae_ri}"
+            print(f"Creating container '{sensor}' under AE URL: {ae_url}")  # Debug: 컨테이너 생성 로그
+            create_container(ae_url, sensor, new_ae_ri)
 
     return jsonify({"status": "success"}), 200
 
@@ -139,5 +173,6 @@ def health_check():
     return jsonify({"status": "MN-AE is running", "MN-CSE URL": MN_CSE_URL, "IN-CSE URL": IN_CSE_URL}), 200
 
 if __name__ == '__main__':
-    create_subscription()
+    threading.Thread(target=create_subscription).start()
     app.run(host='0.0.0.0', debug=True, port=5000)
+    CORS(app)
