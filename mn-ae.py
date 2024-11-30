@@ -79,6 +79,21 @@ def create_container(ae_url, sensor, ae_ri):
     else:
         print(f"Failed to create container '{sensor}': {response.status_code} {response.text}")
 
+def create_timeseries(ae_url, sensor, ae_ri):
+    header = create_headers(ae_ri, '29', 'create_ts')
+    timeseries_payload = {
+        "m2m:ts": {
+            "rn": sensor,  # Resource name for the timeseries
+            "mni": 1000,  # Maximum number of instances
+        }
+    }
+
+    response = requests.post(ae_url, headers=header, json=timeseries_payload, verify=False)
+    if response.status_code == 201:
+        print(f"TimeSeries '{sensor}' created successfully under AE {ae_url}")
+    else:
+        print(f"Failed to create TimeSeries '{sensor}': {response.status_code} {response.text}")
+
 def create_subscription():
     subscription_url = MN_CSE_URL
     header = create_headers(CONFIG['MN_ORIGINATOR'], '23', 'create_sub')
@@ -165,8 +180,8 @@ def handle_notification():
         sensor_names = ["temperature", "humid", "light"]
         for sensor in sensor_names:
             ae_url = f"https://{CONFIG['MN_CSE_HOST']}:{CONFIG['MN_CSE_PORT']}/{new_ae_ri}"
-            print(f"Creating container '{sensor}' under AE URL: {ae_url}")
-            create_container(ae_url, sensor, new_ae_ri)
+            print(f"Creating TimeSeries Resource '{sensor}' under AE URL: {ae_url}")
+            create_timeseries(ae_url, sensor, new_ae_ri)
 
     return jsonify({"status": "success"}), 200
 
@@ -175,10 +190,10 @@ def handle_notification():
 def sync_to_in_cse():
     data = request.json
     ae_id = data.get("ae_id")
-    sensor_name = data.get("sensor_name")
+    sensor_name = data.get("sensor_name") #sensor_name이 아닌 timeseriesResource의 orginator를 따와야함
     
     response = requests.get(
-        f"{MN_CSE_URL}/{ae_id}/{sensor_name}/contentInstance",
+        f"{MN_CSE_URL}/{ae_id}/{sensor_name}/contentInstance", #timeseriesInstance로 바꿔야함
         headers={"Authorization": f"Bearer {CONFIG['AUTH_TOKEN']}"},
         verify=False
     )
@@ -186,7 +201,7 @@ def sync_to_in_cse():
     if response.status_code == 200:
         sensor_data = response.json().get("m2m:cin", {}).get("con")
         if sensor_data:
-            payload = {
+            payload = { #timeSeriesInstance에 맞게 양식 수정해야함
                 "m2m:cin": {
                     "con": sensor_data
                 }
