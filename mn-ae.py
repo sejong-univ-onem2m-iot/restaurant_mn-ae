@@ -134,7 +134,7 @@ def handle_notification():
         print(f"New AE created: {new_ae_rn}")
 
         # 센서별 Container 생성
-        sensor_names = ["temperatureSensor", "humiditySensor", "lightSensor"]
+        sensor_names = ["temperature", "humid", "light"]
         for sensor in sensor_names:
             ae_url = f"http://localhost:8080/{new_ae_ri}"
             print(f"Creating container '{sensor}' under AE URL: {ae_url}")  # Debug: 컨테이너 생성 로그
