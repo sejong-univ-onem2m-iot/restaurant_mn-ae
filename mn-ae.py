@@ -9,8 +9,8 @@ import time
 app = Flask(__name__)
 
 # MN-CSE 및 IN-CSE의 엔드포인트
-MN_CSE_URL = "http://localhost:8080/id-in"
-IN_CSE_URL = "http://localhost:8080/id-in" #in cse로 바꿔줘야함
+MN_CSE_URL = "https://localhost:3000/id-in"
+IN_CSE_URL = "https://localhost:8080/id-in" #in cse로 바꿔줘야함
 AE_ID = 'ID-IN'
 
 # 각 request에 맞는 onem2m 표준 header 생성
@@ -44,7 +44,7 @@ def create_container(ae_url, sensor, ae_ri):
         }
     }
 
-    response = requests.post(ae_url, headers=header, json=container_payload)
+    response = requests.post(ae_url, headers=header, json=container_payload, verify = False)
     if response.status_code == 201:
         print(f"Container '{sensor}' created successfully under AE {ae_url}")
     else:
@@ -57,18 +57,18 @@ def create_subscription():
     subscription_payload = {
         "m2m:sub": {
             "rn": "aeSubscription",
-            "nu": ["http://192.168.0.2:5000/notifi"],
+            "nu": ["http://192.168.0.8:5000/notifi"],
             "nct": 1,
             "enc": {
                 "net": [3]  # Event type: Resource Creation
             }
         }
     }
-    responses = requests.get(subscription_url, headers={"X-M2M-Origin": "CAdmin", "Accept": "application/json"})
+    responses = requests.get(subscription_url, headers={"X-M2M-Origin": "CAdmin", "Accept": "application/json"}, verify = False)
     if responses.status_code == 409: #잘 안먹힘 나중에 다시 봐야할듯
         print("Subscription already exists. Skipping creation.")
         return  # 이미 존재하므로 생성하지 않음
-    response = requests.post(subscription_url, headers=header, json=subscription_payload)
+    response = requests.post(subscription_url, headers=header, json=subscription_payload, verify = False)
     if response.status_code == 201:
         print("Subscription created successfully!")
     else:
@@ -89,7 +89,7 @@ def register_adn_ae():
             "srv": ["2a", "3", "4"]
         }
     }
-    response = requests.post(f"{IN_CSE_URL}", headers = header, json=payload)
+    response = requests.post(f"{IN_CSE_URL}", headers = header, json=payload, verify = False)
     if response.status_code == 201:
         return jsonify({"message": "AE 등록 성공", "data": response.json()}), 201
     else:
@@ -136,7 +136,7 @@ def handle_notification():
         # 센서별 Container 생성
         sensor_names = ["temperature", "humid", "light"]
         for sensor in sensor_names:
-            ae_url = f"http://localhost:8080/{new_ae_ri}"
+            ae_url = f"https://localhost:3000/{new_ae_ri}"
             print(f"Creating container '{sensor}' under AE URL: {ae_url}")  # Debug: 컨테이너 생성 로그
             create_container(ae_url, sensor, new_ae_ri)
 
@@ -149,7 +149,7 @@ def sync_to_in_cse():
     ae_id = data.get("ae_id")
     sensor_name = data.get("sensor_name")
     # MN-CSE에서 데이터 가져오기
-    response = requests.get(f"{MN_CSE_URL}/{ae_id}/{sensor_name}/contentInstance")
+    response = requests.get(f"{MN_CSE_URL}/{ae_id}/{sensor_name}/contentInstance", verify = False)
     if response.status_code == 200:
         sensor_data = response.json().get("m2m:cin", {}).get("con")
         if sensor_data:
@@ -159,7 +159,7 @@ def sync_to_in_cse():
                     "con": sensor_data
                 }
             }
-            response_in_cse = requests.post(f"{IN_CSE_URL}/{ae_id}/{sensor_name}/contentInstance", json=payload)
+            response_in_cse = requests.post(f"{IN_CSE_URL}/{ae_id}/{sensor_name}/contentInstance", json=payload, verify = False)
             if response_in_cse.status_code == 201:
                 return jsonify({"message": "IN-CSE로 데이터 동기화 성공"}), 201
             else:
