@@ -143,28 +143,6 @@ def create_subscription():
     else:
         print(f"Failed to create subscription: {response.status_code} {response.text}")
 
-@app.route('/register_adn_ae', methods=['POST'])
-#@require_token
-def register_adn_ae():
-    data = request.json
-    ae_id = data.get("ae_id")
-    header = create_headers(CONFIG['MN_ORIGINATOR'], '2', 'create_ae')
-    payload = {
-        "m2m:ae": {
-            "rn": data.get("rn", "test_sensor2"),
-            "api": data.get("api", "NAppID.myapp"),
-            "lbl": [],
-            "rr": True,
-            "srv": ["2a", "3", "4"]
-        }
-    }
-    
-    response = requests.post(IN_CSE_URL, headers=header, json=payload, verify=False)
-    if response.status_code == 201:
-        return jsonify({"message": "AE 등록 성공", "data": response.json()}), 201
-    else:
-        return jsonify({"message": "AE 등록 실패", "status": response.status_code}), response.status_code
-
 @app.route('/notifi', methods=['POST'])
 #@require_token
 def handle_notification():
@@ -199,13 +177,33 @@ def handle_notification():
         create_container(ae_url, cnt_name, new_ae_ri)
     else: # 그외의 센서가 ae로 등록될 경우
         print(f"New AE created: {new_ae_rn}")
-        sensor_names = ["temperature", "humid", "light"]
+        sensor_names = ["temperature", "humid", "noise"]
         for sensor in sensor_names:
             ae_url = f"https://{CONFIG['MN_CSE_HOST']}:{CONFIG['MN_CSE_PORT']}/{new_ae_ri}"
             print(f"Creating TimeSeries Resource '{sensor}' under AE URL: {ae_url}")
             create_timeseries(ae_url, sensor, new_ae_ri)
 
     return jsonify({"status": "success"}), 200
+
+def create_group(cnt_ri):
+    header = create_headers(f"C{cnt_ri}", '9', 'create_grp')
+    group_payload = {
+        "m2m:ts": {
+            "rn": "sensor_grp",  # Resource name for the timeseries
+            "mnm": 10, #maximum member number 
+            "mid":[
+                f"{MN_CSE_URL}/{cnt_ri}/humid",
+                f"{MN_CSE_URL}/{cnt_ri}/temperature",
+                f"{MN_CSE_URL}/{cnt_ri}/light"
+            ]
+        }
+    }
+
+    response = requests.post(f"{MN_CSE_URL}/C{cnt_ri}", headers=header, json=group_payload, verify=False)
+    if response.status_code == 201:
+        print(f"Group sensor_grp created successfully under AE {cnt_ri}")
+    else:
+        print(f"Failed to create TimeSeries sensor_grp: {response.status_code} {response.text}")
 
 @app.route('/sync_to_in_cse', methods=['POST'])
 #@require_token
@@ -257,6 +255,7 @@ def health_check():
     }), 200
 
 if __name__ == '__main__':
-    threading.Thread(target=create_subscription).start()
-    threading.Thread(target=register_mn_ae).start()
+    #threading.Thread(target=create_subscription).start()
+    #threading.Thread(target=register_mn_ae).start()
+    threading.Thread(create_group("myRestaurant1")).start()
     app.run(host='0.0.0.0', debug=True, port=int(CONFIG['LOCAL_PORT']))
