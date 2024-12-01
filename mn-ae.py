@@ -7,19 +7,16 @@ import threading
 import time
 from functools import wraps
 
-# Global Configuration
 CONFIG = {
-    'MN_CSE_HOST': 'localhost',
-    'MN_CSE_PORT': '3000',
-    'IN_CSE_HOST': 'localhost',
-    'IN_CSE_PORT': '8080',
-    'LOCAL_HOST': '192.168.0.8',
-    'LOCAL_PORT': '5000',
-    'AE_ID': 'ID-IN',
-    'AUTH_TOKEN': 'your_secret_token_here',  # 실제 토큰으로 교체 필요
-    'MN_ORIGINATOR': 'CAdmin'  # MN-CSE Originator
+    'IN_CSE_HOST': os.getenv('IN_CSE_HOST'),
+    'IN_CSE_PORT': os.getenv('IN_CSE_PORT'),
+    'LOCAL_HOST': os.getenv('LOCAL_HOST'),
+    'LOCAL_PORT': os.getenv('LOCAL_PORT'),
+    'AUTH_TOKEN': os.getenv('AUTH_TOKEN'),
+    'MN_ORIGINATOR': os.getenv('MN_ORIGINATOR'),
+    'MN_CSE_HOST': os.getenv('MN_CSE_HOST'),
+    'MN_CSE_PORT': os.getenv('MN_CSE_PORT')
 }
-
 # URLs
 MN_CSE_URL = f"https://{CONFIG['MN_CSE_HOST']}:{CONFIG['MN_CSE_PORT']}/id-in"
 IN_CSE_URL = f"https://{CONFIG['IN_CSE_HOST']}:{CONFIG['IN_CSE_PORT']}/id-in"
@@ -70,11 +67,6 @@ def create_container(ae_url, sensor, ae_ri):
     container_payload = {
         "m2m:cnt": {
             "rn": sensor
-            "con": {
-                "power": "" #on/off
-                "lux": "" #밝기
-                "rgb": "rgb" #색상
-            }
         }
     }
 
@@ -132,7 +124,7 @@ def create_subscription():
         print(f"Failed to create subscription: {response.status_code} {response.text}")
 
 @app.route('/register_adn_ae', methods=['POST'])
-@require_token
+#@require_token
 def register_adn_ae():
     data = request.json
     ae_id = data.get("ae_id")
@@ -154,7 +146,7 @@ def register_adn_ae():
         return jsonify({"message": "AE 등록 실패", "status": response.status_code}), response.status_code
 
 @app.route('/notifi', methods=['POST'])
-@require_token
+#@require_token
 def handle_notification():
     notification = request.get_json()
     print(f"Notification received: {json.dumps(notification, indent=4)}")
@@ -196,7 +188,7 @@ def handle_notification():
     return jsonify({"status": "success"}), 200
 
 @app.route('/sync_to_in_cse', methods=['POST'])
-@require_token
+#@require_token
 def sync_to_in_cse():
     data = request.json
     ae_id = data.get("ae_id")
@@ -235,7 +227,7 @@ def sync_to_in_cse():
                        "status": response.status_code}), response.status_code
 
 @app.route('/health_check', methods=['GET'])
-@require_token
+#@require_token
 def health_check():
     return jsonify({
         "status": "MN-AE is running",
