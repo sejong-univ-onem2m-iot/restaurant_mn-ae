@@ -6,16 +6,16 @@ from datetime import datetime
 import threading
 import time
 from functools import wraps
-
+import os
 CONFIG = {
-    'IN_CSE_HOST': os.getenv('IN_CSE_HOST'),
-    'IN_CSE_PORT': os.getenv('IN_CSE_PORT'),
-    'LOCAL_HOST': os.getenv('LOCAL_HOST'),
-    'LOCAL_PORT': os.getenv('LOCAL_PORT'),
+    'IN_CSE_HOST': '127.0.0.1',
+    'IN_CSE_PORT': '4000',
+    'LOCAL_HOST': '192.168.0.2',
+    'LOCAL_PORT': '5761',
     'AUTH_TOKEN': os.getenv('AUTH_TOKEN'),
-    'MN_ORIGINATOR': os.getenv('MN_ORIGINATOR'),
-    'MN_CSE_HOST': os.getenv('MN_CSE_HOST'),
-    'MN_CSE_PORT': os.getenv('MN_CSE_PORT')
+    'MN_ORIGINATOR': "CAdmin",
+    'MN_CSE_HOST': '127.0.0.1',
+    'MN_CSE_PORT': '4000'
 }
 # URLs
 MN_CSE_URL = f"https://{CONFIG['MN_CSE_HOST']}:{CONFIG['MN_CSE_PORT']}/id-in"
@@ -62,11 +62,30 @@ def create_headers(originator: str, resource_type: str = None, request_id: str =
 
     return headers
 
-def create_container(ae_url, sensor, ae_ri):
+def register_mn_ae(): #mn-ae에대한 ae를 in-cse에 생성 요청하는 코드 // NO DEBUGGING
+    time.sleep(2)
+    mn_ae_ori = "myRestaurant1" #환경변수로 따로 설정필요->레스토랑 이름으로 입력시키면 아주 간편
+    header = create_headers(f"C{mn_ae_ori}", '2', 'create_ae')
+
+    payload = {
+        "m2m:ae": {
+            "rn": mn_ae_ori,
+            "api": f"N{mn_ae_ori}.myapp",
+            "lbl": ["test"],
+            "rr": True,
+            "srv": ["2a", "3", "4"]
+        }
+    }
+    
+    response = requests.post(IN_CSE_URL, headers=header, json=payload, verify=False)
+    if response.status_code == 201:
+        return jsonify({"message": "AE 등록 성공", "data": response.json()}), 201
+
+def create_container(ae_url, sensor, ae_ri): #
     header = create_headers(ae_ri, '3', 'creat_cnt')
     container_payload = {
         "m2m:cnt": {
-            "rn": sensor
+            "rn": 'command'
         }
     }
 
@@ -92,6 +111,7 @@ def create_timeseries(ae_url, sensor, ae_ri):
         print(f"Failed to create TimeSeries '{sensor}': {response.status_code} {response.text}")
 
 def create_subscription():
+    time.sleep(1)
     subscription_url = MN_CSE_URL
     header = create_headers(CONFIG['MN_ORIGINATOR'], '23', 'create_sub')
     subscription_payload = {
@@ -238,4 +258,5 @@ def health_check():
 
 if __name__ == '__main__':
     threading.Thread(target=create_subscription).start()
+    threading.Thread(target=register_mn_ae).start()
     app.run(host='0.0.0.0', debug=True, port=int(CONFIG['LOCAL_PORT']))
