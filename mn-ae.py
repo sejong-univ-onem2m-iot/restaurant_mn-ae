@@ -8,6 +8,9 @@ import time
 from functools import wraps
 import os
 import threading
+import warnings
+warnings.filterwarnings('ignore')
+
 CONFIG = {
     'IN_CSE_HOST': '127.0.0.1',
     'IN_CSE_PORT': '4000',
@@ -247,7 +250,97 @@ def sync_to_in_cse():
     else:
         return jsonify({"message": "MN-CSE에서 데이터 가져오기 실패", 
                        "status": response.status_code}), response.status_code
+# 수정해야할 코드 12.03
+"""
+CONFIG = {
+    'MN_CSE_URL': "https://192.168.0.8:3000/cse-in/Sensor/grp_uaCwwSWq7k/fopt/la",  # MN-CSE URL
+    'IN_CSE_URL': "https://192.168.0.9:3000/cse-in/Sensor",  # IN-CSE URL
+    'AUTH_TOKEN': "your_auth_token_here",  # Authorization Token
+    'HEADERS': {
+        "Accept": "application/json",
+        "X-M2M-RI": "12345",
+        "X-M2M-Origin": "Sensors",
+        "X-M2M-RVI": "3"
+    }
+}
+"""
+def fetch_from_mn_cse():
+    #Fetch the latest data from MN-CSE.
+    header = create_headers("myRestaurant1", None, "fetch_data", None, "3") #originator를 영민 코드에선 Sensors
+    try:
+        response = requests.get(
+            f"{MN_CSE_URL}/Sensor/{GRP_RN}/fopt/la", headers=header, verify=False
+        )
+        if response.status_code == 200:
+            print("Fetched data from MN-CSE successfully!")
+            print("fetched data: ", response.json())
+            return response.json()
+        else:
+            print(f"Failed to fetch from MN-CSE: {response.status_code} {response.text}")
+            return None
+    except Exception as e:
+        print(f"Error fetching from MN-CSE: {e}")
+        return None
 
+def send_to_in_cse(data):
+    """Send the processed data to IN-CSE."""
+    try:
+        headers = CONFIG['HEADERS']
+        headers["X-M2M-Origin"] = "CAdmin"  # Update originator for IN-CSE
+        
+        response = requests.post(
+            CONFIG['IN_CSE_URL'], headers=headers, json=data, verify=False
+        )
+        if response.status_code == 201:
+            print("Data sent to IN-CSE successfully!")
+        else:
+            print(f"Failed to send to IN-CSE: {response.status_code} {response.text}")
+    except Exception as e:
+        print(f"Error sending to IN-CSE: {e}")
+
+
+@app.route('/sync_data', methods=['GET'])
+def sync_data():
+    """Fetch data from MN-CSE, process it, and send it to IN-CSE."""
+    # Fetch data from MN-CSE
+    mn_cse_data = fetch_from_mn_cse()
+    if not mn_cse_data:
+        return jsonify({"message": "Failed to fetch data from MN-CSE"}), 500
+
+    # Process the data (assuming we want to restructure it)
+    processed_data = process_mn_cse_data(mn_cse_data)
+
+    # Send the processed data to IN-CSE
+    send_to_in_cse(processed_data)
+
+    return jsonify({"message": "Data synced successfully"}), 200
+
+
+def process_mn_cse_data(mn_cse_data):
+    """Process the data fetched from MN-CSE."""
+    try:
+        # Extract the response payload
+        responses = mn_cse_data.get("m2m:agr", {}).get("m2m:rsp", [])
+        processed = []
+
+        for resp in responses:
+            # Extract the timeseries instance content
+            content_instance = resp.get("pc", {}).get("m2m:tsi", {}) #어떻게 처리해서 보낼진 영민이랑 상의
+            if content_instance:
+                processed.append({
+                    "con": content_instance.get("con"),  # Data content
+                    "ts": content_instance.get("ct"),   # Creation timestamp
+                    "rn": content_instance.get("rn"),   # Resource name
+                })
+        
+        # Format the data as required for IN-CSE
+        return {
+            "m2m:tsi_batch": processed  # m2m:tsi_batch이유는 감싸서 전달하면 반복적으로 tsi 인스턴스를 생성한다는것 같음 실험해봐야함.
+        }
+    except Exception as e:
+        print(f"Error processing MN-CSE data: {e}")
+        return {}
+# 수정해야할 코드 12.03
 @app.route('/health_check', methods=['GET'])
 #@require_token
 def health_check():
