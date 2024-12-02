@@ -10,7 +10,7 @@ import os
 CONFIG = {
     'IN_CSE_HOST': '127.0.0.1',
     'IN_CSE_PORT': '4000',
-    'LOCAL_HOST': '192.168.0.2',
+    'LOCAL_HOST': '172.16.25.175',#'192.168.0.2',
     'LOCAL_PORT': '5761',
     'AUTH_TOKEN': os.getenv('AUTH_TOKEN'),
     'MN_ORIGINATOR': "CAdmin",
@@ -188,18 +188,18 @@ def handle_notification():
 def create_group(cnt_ri):
     header = create_headers(f"C{cnt_ri}", '9', 'create_grp')
     group_payload = {
-        "m2m:ts": {
+        "m2m:grp": {
             "rn": "sensor_grp",  # Resource name for the timeseries
             "mnm": 10, #maximum member number 
             "mid":[
-                f"{MN_CSE_URL}/{cnt_ri}/humid",
-                f"{MN_CSE_URL}/{cnt_ri}/temperature",
-                f"{MN_CSE_URL}/{cnt_ri}/light"
+                "ts5193044668355629094",
+                "ts469399155133749405",
+                "ts662339318388642485"
             ]
         }
     }
 
-    response = requests.post(f"{MN_CSE_URL}/C{cnt_ri}", headers=header, json=group_payload, verify=False)
+    response = requests.post(f"https://{CONFIG['MN_CSE_HOST']}:{CONFIG['MN_CSE_PORT']}/C{cnt_ri}", headers=header, json=group_payload, verify=False)
     if response.status_code == 201:
         print(f"Group sensor_grp created successfully under AE {cnt_ri}")
     else:
@@ -255,7 +255,7 @@ def health_check():
     }), 200
 
 if __name__ == '__main__':
-    #threading.Thread(target=create_subscription).start()
-    #threading.Thread(target=register_mn_ae).start()
+    threading.Thread(target=create_subscription).start()
+    threading.Thread(target=register_mn_ae).start()
     threading.Thread(create_group("myRestaurant1")).start()
     app.run(host='0.0.0.0', debug=True, port=int(CONFIG['LOCAL_PORT']))
