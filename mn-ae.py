@@ -7,10 +7,11 @@ import threading
 import time
 from functools import wraps
 import os
+import threading
 CONFIG = {
     'IN_CSE_HOST': '127.0.0.1',
     'IN_CSE_PORT': '4000',
-    'LOCAL_HOST': '172.16.25.175',#'192.168.0.2',
+    'LOCAL_HOST': '192.168.0.2',#'192.168.0.2',172.16.25.175
     'LOCAL_PORT': '5761',
     'AUTH_TOKEN': os.getenv('AUTH_TOKEN'),
     'MN_ORIGINATOR': "CAdmin",
@@ -24,6 +25,7 @@ NOTIFICATION_URL = f"http://{CONFIG['LOCAL_HOST']}:{CONFIG['LOCAL_PORT']}/notifi
 
 app = Flask(__name__)
 CORS(app)
+ts_id = [] #ts_id param
 
 # Token Authentication Decorator
 def require_token(f):
@@ -42,9 +44,9 @@ def require_token(f):
 
 def create_headers(originator: str, resource_type: str = None, request_id: str = None, time: str = None, rsc: str = None) -> dict:
     headers = {
-        "Accept": "application/json;",
+        "Accept": "application/json",
         "X-M2M-Origin": originator,
-        "X-M2M-RVI": "2a",
+        "X-M2M-RVI": "3",
         "Authorization": f"Bearer {CONFIG['AUTH_TOKEN']}"
     }
 
@@ -63,7 +65,6 @@ def create_headers(originator: str, resource_type: str = None, request_id: str =
     return headers
 
 def register_mn_ae(): #mn-ae에대한 ae를 in-cse에 생성 요청하는 코드 // NO DEBUGGING
-    time.sleep(2)
     mn_ae_ori = "myRestaurant1" #환경변수로 따로 설정필요->레스토랑 이름으로 입력시키면 아주 간편
     header = create_headers(f"C{mn_ae_ori}", '2', 'create_ae')
 
@@ -79,7 +80,7 @@ def register_mn_ae(): #mn-ae에대한 ae를 in-cse에 생성 요청하는 코드
     
     response = requests.post(IN_CSE_URL, headers=header, json=payload, verify=False)
     if response.status_code == 201:
-        return jsonify({"message": "AE 등록 성공", "data": response.json()}), 201
+        print("message: AE 등록 성공\n data:", response.json())
 
 def create_container(ae_url, sensor, ae_ri): #
     header = create_headers(ae_ri, '3', 'creat_cnt')
@@ -100,18 +101,25 @@ def create_timeseries(ae_url, sensor, ae_ri):
     timeseries_payload = {
         "m2m:ts": {
             "rn": sensor,  # Resource name for the timeseries
-            "mni": 1000,  # Maximum number of instances
+            "mni": 4320,  # Maximum number of instances for a month
         }
     }
 
     response = requests.post(ae_url, headers=header, json=timeseries_payload, verify=False)
+    print("response content", response.json())
+    
     if response.status_code == 201:
+        response_data = response.json()
+        ri = response_data.get("m2m:ts", {}).get("ri")  # Extract the 'ri' value
         print(f"TimeSeries '{sensor}' created successfully under AE {ae_url}")
+        print(f"Extracted Resource ID (ri): {ri}")
+        return ri  # Return the extracted 'ri'
     else:
         print(f"Failed to create TimeSeries '{sensor}': {response.status_code} {response.text}")
+        return None  # Return None if the creation failed
 
 def create_subscription():
-    time.sleep(1)
+    time.sleep(2)
     subscription_url = MN_CSE_URL
     header = create_headers(CONFIG['MN_ORIGINATOR'], '23', 'create_sub')
     subscription_payload = {
@@ -181,21 +189,17 @@ def handle_notification():
         for sensor in sensor_names:
             ae_url = f"https://{CONFIG['MN_CSE_HOST']}:{CONFIG['MN_CSE_PORT']}/{new_ae_ri}"
             print(f"Creating TimeSeries Resource '{sensor}' under AE URL: {ae_url}")
-            create_timeseries(ae_url, sensor, new_ae_ri)
+            ts_id.append(create_timeseries(ae_url, sensor, new_ae_ri))
 
     return jsonify({"status": "success"}), 200
 
-def create_group(cnt_ri):
+def create_group(cnt_ri, ts_id):
     header = create_headers(f"C{cnt_ri}", '9', 'create_grp')
     group_payload = {
         "m2m:grp": {
             "rn": "sensor_grp",  # Resource name for the timeseries
-            "mnm": 10, #maximum member number 
-            "mid":[
-                "ts5193044668355629094",
-                "ts469399155133749405",
-                "ts662339318388642485"
-            ]
+            "mnm": 10, #maximum member number a
+            "mid": ts_id
         }
     }
 
@@ -254,8 +258,18 @@ def health_check():
         "configuration": {k: v for k, v in CONFIG.items() if 'TOKEN' not in k}
     }), 200
 
+init_task_done = threading.Event()
+
+def start_init_tasks():
+    if not init_task_done.is_set():
+        time.sleep(2)
+        create_subscription()
+        register_mn_ae()
+        time.sleep(2)
+        print("ts_id list: ", ts_id)
+        create_group("myRestaurant1", ts_id)
+        init_task_done.set()
+
 if __name__ == '__main__':
-    threading.Thread(target=create_subscription).start()
-    threading.Thread(target=register_mn_ae).start()
-    threading.Thread(create_group("myRestaurant1")).start()
+    threading.Thread(target=start_init_tasks).start()
     app.run(host='0.0.0.0', debug=True, port=int(CONFIG['LOCAL_PORT']))
